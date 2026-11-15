@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<title>Jerry BPF Builder</title>
+<style>
+:root{color-scheme:dark;--bg:#080d18;--card:#111a2c;--line:#273653;--txt:#eaf0ff;--mut:#a8b4cb;--blue:#4da3ff;--green:#54d69a;--warn:#f4c46a}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(800px 420px at 15% -10%,#192c55 0,transparent 65%),var(--bg);color:var(--txt);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:calc(18px + env(safe-area-inset-top)) 14px calc(28px + env(safe-area-inset-bottom))}.wrap{max-width:680px;margin:auto}.head{margin:4px 2px 16px}.head h1{font-size:24px;margin:0 0 5px}.head p,.muted{color:var(--mut);margin:0}.card{background:rgba(17,26,44,.94);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0}.card h2{font-size:17px;margin:0 0 10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:540px){.grid{grid-template-columns:1fr}}label{display:block;font-weight:650;margin:10px 0 5px}input[type=text],input[type=file]{width:100%;min-height:46px;padding:11px;border:1px solid #354767;border-radius:10px;background:#0a1222;color:var(--txt);font:inherit}input[type=file]{font-size:13px}button{width:100%;min-height:48px;border:1px solid #477db5;border-radius:11px;background:#17365b;color:white;font:700 15px system-ui;cursor:pointer;margin-top:10px}button.secondary{border-color:#40506a;background:#182235}button:disabled{opacity:.48;cursor:not-allowed}.badge{display:inline-block;border:1px solid #38547e;border-radius:999px;padding:3px 9px;color:#b9d8ff;font-size:12px;margin:3px 4px 4px 0}.note{border-left:3px solid var(--warn);padding:10px 12px;background:#272113;border-radius:7px;color:#ffe2a4;font-size:13px;margin-top:12px}.ok{color:var(--green)}.status{min-height:26px;color:#b9d8ff;margin-top:10px;overflow-wrap:anywhere}.small{font-size:13px;color:var(--mut)}.footer{text-align:center;color:#76849c;font-size:12px;margin-top:18px}code{color:#d2ddf3}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="head">
+    <h1>Jerry BPF Builder</h1>
+    <p>Kiểm tra cấu hình JSON trong BPF, thêm quy tắc direct an toàn và xác minh lại file sau khi tạo.</p>
+    <span class="badge">Xử lý ngay trên thiết bị</span><span class="badge">Không gửi file lên máy chủ</span>
+  </header>
+  <section class="card">
+    <h2>1. Chọn mẫu BPF</h2>
+    <p class="small">Có thể dùng mẫu tích hợp hoặc chọn file BPF khác. File được kiểm tra cấu trúc trước khi cho phép tạo.</p>
+    <label for="file">Dùng file BPF khác (không bắt buộc)</label>
+    <input id="file" type="file" accept=".bpf,application/octet-stream">
+    <div id="templateStatus" class="status">Đang dùng mẫu BPF tích hợp.</div>
+  </section>
+  <section class="card">
+    <h2>2. Tạo file BPF</h2>
+    <p class="small">Công cụ giữ nguyên metadata của mẫu; các trường liên hệ/tác giả không được ghi vào định dạng BPF vì chưa xác định được schema metadata tương thích.</p>
+    <label for="outName">Tên file xuất</label><input id="outName" type="text" value="Antiban_Jerry_Mod.bpf" maxlength="100">
+    <button id="build">Tạo file BPF</button>
+    <div id="buildStatus" class="status" aria-live="polite"></div>
+  </section>
+  <section class="card">
+    <h2>3. Lưu hoặc chia sẻ</h2>
+    <p class="small">Sau khi tạo xong, chọn chia sẻ để mở bảng ứng dụng của iPhone, hoặc tải file về thiết bị.</p>
+    <button id="share" class="secondary" disabled>Chia sẻ / Mở bằng ứng dụng</button>
+    <button id="download" class="secondary" disabled>Tải file .bpf</button>
+    <div class="note"><b>Quan trọng:</b> mẫu có các quy tắc định tuyến cho Free Fire và chọn outbound <code>proxy</code>, nhưng không chứa máy chủ proxy/điểm kết nối. Muốn kết nối thực tế, cần cấu hình máy chủ hợp lệ trong ứng dụng BPF tương thích. Công cụ này chỉ cập nhật metadata tác giả, không sửa gameplay, không tạo cheat hay vượt anti-cheat.</div>
+  </section>
+  <p class="footer">Định dạng mẫu: tiền tố BPF + nội dung gzip. Dùng Safari mới trên iPhone nếu trình duyệt khác không hỗ trợ nén/giải nén gzip.</p>
+</main>
+<script>
+'use strict';
+const SAMPLE_B64='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';
+const $=id=>document.getElementById(id);
+let sourceBytes=Uint8Array.from(atob(SAMPLE_B64),c=>c.charCodeAt(0));
+let outputBytes=null;
+const decoder=new TextDecoder('utf-8',{fatal:true});
+const encoder=new TextEncoder();
+// Các miền kết nối/đăng nhập/phân phối nội dung an toàn được tích hợp sẵn.
+// Không bao gồm miền anti-cheat, miền bảo mật hoặc luật né kiểm tra.
+const SAFE_DIRECT_DOMAINS=[
+  'login.common.freefiremobile.com','client.common.freefiremobile.com','version.common.freefiremobile.com',
+  'auth.garena.com','accounts.google.com','accounts.youtube.com','oauth2.googleapis.com',
+  'oauthaccountmanager.googleapis.com','facebook.com','graph.facebook.com',
+  'dl.cdn.freefiremobile.com','dl.dir.freefiremobile.com','dl.aw.freefiremobile.com',
+  'dl.castle.freefiremobile.com','dl.ctl.freefiremobile.com','dl.ctlin.freefiremobile.com',
+  'dl.cvs.freefiremobile.com','dl.gmc.freefiremobile.com','dl.gcp.freefiremobile.com',
+  'dl.hw.freefiremobile.com','dl.ks.freefiremobile.com','cdn.garenanow.com',
+  'dl.garenanow.com','cdn.gxx.garenanow.com','dl.hdltw.gxx.garenanow.com'
+];
+const SAFE_DIRECT_SUFFIXES=['googleapis.com','gstatic.com','googleusercontent.com','fbcdn.net'];
+const PROFILE_NAME='Jerry Mod';
+function addSafeDirectRoutes(config){
+  const data=JSON.parse(config);
+  if(!data.route||typeof data.route!=='object')throw new Error('Không tìm thấy khối route trong cấu hình.');
+  if(!Array.isArray(data.route.rules))throw new Error('route.rules không phải danh sách hợp lệ.');
+  const rule={domain:SAFE_DIRECT_DOMAINS,domain_suffix:SAFE_DIRECT_SUFFIXES,action:'route',outbound:'direct'};
+  const signature=JSON.stringify(rule);
+  const exists=data.route.rules.some(item=>JSON.stringify(item)===signature);
+  if(!exists)data.route.rules.unshift(rule);
+  return JSON.stringify(data,null,2);
+}
+function renameProfile(bytes){
+  const oldName=encoder.encode('Jerry_Mod');
+  const newName=encoder.encode(PROFILE_NAME);
+  const r=new Uint8Array(bytes);
+  for(let i=0;i<=r.length-oldName.length;i++){
+    let ok=true;for(let j=0;j<oldName.length;j++)if(r[i+j]!==oldName[j]){ok=false;break}
+    if(ok){r.set(newName,i);return r;}
+  }
+  return r;
+}
+function join(a,b){const r=new Uint8Array(a.length+b.length);r.set(a);r.set(b,a.length);return r}
+async function streamGzip(bytes,mode){
+  const C=mode==='gzip'?window.CompressionStream:window.DecompressionStream;
+  if(typeof C!=='function')throw new Error('Safari này chưa hỗ trợ gzip. Hãy cập nhật iOS/iPadOS hoặc mở bằng Safari phiên bản mới.');
+  try{
+    const stream=new Blob([bytes]).stream().pipeThrough(new C('gzip'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }catch(err){throw new Error('Không thể '+(mode==='gzip'?'nén':'giải nén')+' gzip: '+(err.message||err));}
+}
+function safeLine(s){return String(s||'').replace(/[\r\n\u0000-\u001f\u007f]/g,' ').replace(/\s+/g,' ').trim()}
+function findJsonEnd(text,start){
+  let depth=0,inString=false,escaped=false;
+  for(let i=start;i<text.length;i++){
+    const c=text[i];
+    if(inString){
+      if(escaped)escaped=false;
+      else if(c==='\\')escaped=true;
+      else if(c==='"')inString=false;
+      continue;
+    }
+    if(c==='"'){inString=true;continue;}
+    if(c==='{')depth++;
+    else if(c==='}'){
+      depth--;
+      if(depth===0)return i+1;
+      if(depth<0)break;
+    }
+  }
+  return -1;
+}
+function cleanConfig(text){
+  const brace=text.indexOf('{');
+  if(brace<0)throw new Error('Không tìm thấy JSON config.');
+  const end=findJsonEnd(text,brace);
+  if(end<0)throw new Error('JSON bị cắt: thiếu dấu } ở cuối cấu hình.');
+  const clean=text.slice(brace,end);
+  try{JSON.parse(clean);}catch(e){throw new Error('JSON không hợp lệ: '+e.message);}
+  return {config:clean,start:brace,end};
+}
+async function inspect(bytes){
+  if(!(bytes instanceof Uint8Array)||bytes.length<4)throw new Error('File BPF quá ngắn hoặc rỗng.');
+  if(bytes[0]!==3||bytes[1]!==1)throw new Error('Không đúng định dạng BPF hỗ trợ: tiền tố phải là 03 01.');
+  if(bytes[2]!==0x1f||bytes[3]!==0x8b)throw new Error('Không tìm thấy chữ ký gzip sau tiền tố BPF.');
+  const plain=await streamGzip(bytes.subarray(2),'gunzip');
+  const markers=[encoder.encode('Jerry Mod'),encoder.encode('SOPHIAGOD')];
+  let hasMarker=false;
+  for(const marker of markers){for(let i=0;i<=plain.length-marker.length;i++){let ok=true;for(let j=0;j<marker.length;j++)if(plain[i+j]!==marker[j]){ok=false;break}if(ok){hasMarker=true;break}}if(hasMarker)break}
+  if(!hasMarker)throw new Error('Không tìm thấy tên profile Jerry Mod trong BPF mẫu.');
+  const off=plain.indexOf(0x7b);
+  if(off<0)throw new Error('Không tìm thấy phần cấu hình trong BPF.');
+  const text=decoder.decode(plain.subarray(off));
+  if(!text.includes('"outbounds"')||!text.includes('"route"'))throw new Error('Mẫu thiếu cấu hình outbounds/route cần thiết.');
+  const parsed=cleanConfig(text);
+  return {plain,off,text,config:parsed.config,configStart:off+parsed.start,configEnd:off+parsed.end};
+}
+$('file').addEventListener('change',async e=>{
+  const f=e.target.files&&e.target.files[0];outputBytes=null;$('share').disabled=true;$('download').disabled=true;
+  if(!f){sourceBytes=Uint8Array.from(atob(SAMPLE_B64),c=>c.charCodeAt(0));$('templateStatus').textContent='Đang dùng mẫu BPF tích hợp.';return}
+  try{sourceBytes=new Uint8Array(await f.arrayBuffer());await inspect(sourceBytes);$('templateStatus').textContent='Đã nhận mẫu hợp lệ: '+f.name+' ('+f.size+' byte).';}
+  catch(err){sourceBytes=Uint8Array.from(atob(SAMPLE_B64),c=>c.charCodeAt(0));e.target.value='';$('templateStatus').textContent='File mẫu không hợp lệ: '+err.message+' Đã tự động quay lại mẫu tích hợp.';}
+});
+$('build').addEventListener('click',async()=>{
+  const b=$('build');b.disabled=true;$('share').disabled=true;$('download').disabled=true;outputBytes=null;
+  try{
+    const {plain,off,config:baseConfig,configStart,configEnd}=await inspect(sourceBytes);
+    let config=addSafeDirectRoutes(baseConfig);
+    try{JSON.parse(config);}catch(e){throw new Error('Cấu hình JSON không hợp lệ sau khi cập nhật: '+e.message);}
+    const rebuilt=join(plain.subarray(0,configStart),join(encoder.encode(config),plain.subarray(configEnd)));
+    const updated=renameProfile(rebuilt);
+    const zipped=await streamGzip(updated,'gzip');
+    const candidate=join(sourceBytes.subarray(0,2),zipped);
+    const verified=await inspect(candidate);
+    JSON.parse(verified.config);
+    outputBytes=candidate;
+    $('buildStatus').innerHTML='<span class="ok">Đã tạo và kiểm tra lại BPF thành công.</span> '+outputBytes.length+' byte. JSON và gzip đầu ra đều vượt qua bước kiểm tra.';
+    $('share').disabled=false;$('download').disabled=false;
+  }catch(err){$('buildStatus').textContent='Không tạo được: '+(err.message||err);}
+  finally{b.disabled=false}
+});
+function outputName(){let n=safeLine($('outName').value)||'Antiban_Jerry_Mod.bpf';n=n.replace(/[\\/:*?"<>|]/g,'_');return /\.bpf$/i.test(n)?n:n+'.bpf'}
+function generatedFile(){if(!outputBytes)throw new Error('Chưa có file BPF để xuất.');return new File([outputBytes],outputName(),{type:'application/octet-stream'});}
+$('share').addEventListener('click',async()=>{
+  if(!outputBytes)return;
+  const f=generatedFile();const data={files:[f],title:f.name};
+  try{if(navigator.share&&(!navigator.canShare||navigator.canShare(data))){await navigator.share(data);return;}}
+  catch(err){if(err&&err.name==='AbortError')return; $('buildStatus').textContent='Không thể mở bảng chia sẻ: '+(err.message||err)+'. Đang thử tải file.';}
+  downloadFile();$('buildStatus').textContent='Đã chuyển sang tải xuống vì Safari không chia sẻ được file.';
+});
+function downloadFile(){if(!outputBytes){$('buildStatus').textContent='Bạn cần tạo file BPF trước khi tải.';return;}const url=URL.createObjectURL(new Blob([outputBytes],{type:'application/octet-stream'}));const a=document.createElement('a');a.href=url;a.download=outputName();a.rel='noopener';document.body.appendChild(a);a.click();a.remove();window.setTimeout(()=>URL.revokeObjectURL(url),120000)}
+$('download').addEventListener('click',downloadFile);
+</script>
+</body>
+</html>
